@@ -323,11 +323,9 @@ with tab1:
         st.markdown("---")
         st.markdown("### 🎙️ Sprachaufnahme & Bearbeitung")
 
-        # KORRIGIERTE ZEILE: Parameter 'scrolling=True' hinzugefügt.
         component_value = st.components.v1.html(
             create_speech_interface(st.session_state.transcript_text),
-            key="speech_to_text",
-            scrolling=True
+            key="speech_to_text"
         )
 
         if component_value and component_value.get("text") != st.session_state.transcript_text:
@@ -420,4 +418,3 @@ with tab3:
     -   **Browser-Kompatibilität:** Die App funktioniert am besten mit **Google Chrome** oder **Microsoft Edge** auf einem Computer oder Android-Gerät.
     -   **Notizen:** Du kannst jederzeit Notizen hinzufügen und separat speichern.
     """)
-
