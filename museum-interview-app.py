@@ -15,6 +15,7 @@ def generate_pdf_simple(interview_data):
     <html>
     <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Interview #{interview_data.get('id', 'N/A')}</title>
         <style>
             @media print {{
@@ -32,7 +33,7 @@ def generate_pdf_simple(interview_data):
             .transcription {{
                 background: #ffffff; border: 1px solid #ddd;
                 padding: 20px; border-radius: 5px;
-                white-space: pre-wrap; margin: 20px 0;
+                white-space: pre-wrap; word-wrap: break-word; margin: 20px 0;
             }}
             .notes {{
                 background: #fff9e6; border-left: 4px solid #ffc107;
@@ -75,12 +76,13 @@ def generate_pdf_simple(interview_data):
     return html_content
 
 def create_speech_interface(initial_text=""):
-    """Erstellt die HTML/JS-Schnittstelle, die live mit Streamlit kommuniziert."""
+    """Erstellt die HTML/JS-Schnittstelle mit Bugfixes für Android (Looping & UI)."""
     escaped_text = json.dumps(initial_text)
     return f"""
     <!DOCTYPE html>
     <html>
     <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <script src="https://cdn.jsdelivr.net/gh/streamlit/streamlit/frontend/src/lib/streamlit.js"></script>
         <style>
             body {{ margin: 0; font-family: sans-serif; }}
@@ -96,7 +98,8 @@ def create_speech_interface(initial_text=""):
             #status {{ font-weight: bold; }}
             .transcript-display {{
                 border: 1px solid #ddd; border-radius: 8px; padding: 10px;
-                min-height: 100px; background: #fff; white-space: pre-wrap;
+                min-height: 80px; background: #fff; 
+                white-space: pre-wrap; word-wrap: break-word;
             }}
         </style>
     </head>
@@ -109,7 +112,7 @@ def create_speech_interface(initial_text=""):
                 <button onclick="start()" id="startBtn">▶️ Start</button>
                 <button onclick="stop()" id="stopBtn" disabled>⏹️ Stop</button>
             </div>
-            <label style="font-weight: bold; display: block; margin-bottom: 5px;">🗣️ Transkription:</label>
+            <label style="font-weight: bold; display: block; margin-bottom: 5px;">🗣️ Live-Transkription:</label>
             <div id="final" class="transcript-display"></div>
             <div id="interim" style="color: #666; font-style: italic; margin-top: 5px;"></div>
         </div>
@@ -118,8 +121,8 @@ def create_speech_interface(initial_text=""):
             Streamlit.setComponentReady();
             let rec = null;
             let active = false;
-            let finalTranscript = {escaped_text};
-            document.getElementById('final').textContent = finalTranscript;
+            let currentTranscript = {escaped_text};
+            document.getElementById('final').textContent = currentTranscript;
 
             if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {{
                 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -137,24 +140,18 @@ def create_speech_interface(initial_text=""):
 
                 rec.onresult = (event) => {{
                     let interim_transcript = '';
-                    let full_final_transcript = '';
-
-                    // Baue das Transkript JEDES MAL komplett neu auf, um Loops zu verhindern
-                    for (let i = 0; i < event.results.length; ++i) {{
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {{
                         let segment = event.results[i][0].transcript;
                         if (event.results[i].isFinal) {{
-                            full_final_transcript += segment.trim() + ' ';
+                            currentTranscript += segment.trim() + ' ';
                         }} else {{
                             interim_transcript += segment;
                         }}
                     }}
                     
-                    finalTranscript = full_final_transcript;
-                    document.getElementById('final').textContent = finalTranscript;
+                    document.getElementById('final').textContent = currentTranscript;
                     document.getElementById('interim').textContent = interim_transcript;
-                    
-                    // Sende das Ergebnis automatisch an Streamlit
-                    Streamlit.setComponentValue({{ text: finalTranscript }});
+                    Streamlit.setComponentValue({{ text: currentTranscript }});
                 }};
 
                 rec.onerror = (e) => {{
@@ -167,7 +164,7 @@ def create_speech_interface(initial_text=""):
                 
                 rec.onend = () => {{
                     if (active) {{
-                        rec.start(); // Automatischer Neustart bei Verbindungsabbruch
+                        rec.start();
                     }} else {{
                         document.getElementById('status').innerHTML = '✅ Gestoppt';
                         document.getElementById('startBtn').disabled = false;
@@ -191,7 +188,6 @@ def create_speech_interface(initial_text=""):
 # ==============================================================================
 
 def init_database():
-    """Initialisiert die SQLite-Datenbank und die Tabelle."""
     try:
         conn = sqlite3.connect('interviews.db')
         cursor = conn.cursor()
@@ -199,14 +195,9 @@ def init_database():
         if cursor.fetchone()[0] == 0:
             cursor.execute('''
                 CREATE TABLE interviews (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    interview_date TEXT NOT NULL,
-                    interviewer TEXT,
-                    interviewee_info TEXT,
-                    transcription TEXT,
-                    notes TEXT,
-                    metadata TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, interview_date TEXT NOT NULL,
+                    interviewer TEXT, interviewee_info TEXT, transcription TEXT,
+                    notes TEXT, metadata TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
             conn.commit()
@@ -217,7 +208,6 @@ def init_database():
         return False
 
 def save_interview(interview_data: Dict[str, Any]) -> int:
-    """Speichert einen neuen Interview-Eintrag in der DB."""
     conn = sqlite3.connect('interviews.db')
     cursor = conn.cursor()
     date_str = interview_data.get('date').isoformat()
@@ -225,11 +215,8 @@ def save_interview(interview_data: Dict[str, Any]) -> int:
         INSERT INTO interviews (interview_date, interviewer, interviewee_info, transcription, notes, metadata)
         VALUES (?, ?, ?, ?, ?, ?)
     ''', (
-        date_str,
-        interview_data.get('interviewer', ''),
-        interview_data.get('interviewee_info', ''),
-        interview_data.get('transcription', ''),
-        interview_data.get('notes', ''),
+        date_str, interview_data.get('interviewer', ''), interview_data.get('interviewee_info', ''),
+        interview_data.get('transcription', ''), interview_data.get('notes', ''),
         json.dumps(interview_data.get('metadata', {}))
     ))
     interview_id = cursor.lastrowid
@@ -238,16 +225,13 @@ def save_interview(interview_data: Dict[str, Any]) -> int:
     return interview_id
 
 def update_interview_field(interview_id: int, field: str, value: str):
-    """Aktualisiert ein bestimmtes Feld (z.B. Transkript oder Notizen) für ein Interview."""
     conn = sqlite3.connect('interviews.db')
     cursor = conn.cursor()
-    # Sichere Methode, um SQL-Injection zu vermeiden
     cursor.execute(f'UPDATE interviews SET {field} = ? WHERE id = ?', (value, interview_id))
     conn.commit()
     conn.close()
 
 def get_interview_by_id(interview_id: int):
-    """Holt ein einzelnes Interview anhand seiner ID aus der DB."""
     conn = sqlite3.connect('interviews.db')
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -269,13 +253,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Session State initialisieren
 if 'current_interview_id' not in st.session_state:
     st.session_state.current_interview_id = None
 if 'transcript_text' not in st.session_state:
     st.session_state.transcript_text = ""
 
-# Datenbank starten
 if not init_database():
     st.stop()
 
@@ -288,7 +270,6 @@ st.caption("Wildvogelpflegestation - Besucherbefragung")
 
 tab1, tab2, tab3 = st.tabs(["📝 **Neues Interview**", "📊 **Übersicht**", "ℹ️ **Hilfe**"])
 
-# --- TAB 1: NEUES INTERVIEW ---
 with tab1:
     with st.expander("👤 Interview-Details", expanded=True):
         col1, col2 = st.columns(2)
@@ -312,7 +293,7 @@ with tab1:
             if interview_id:
                 st.session_state.current_interview_id = interview_id
                 st.session_state.transcript_text = ""
-                st.success(f"✅ Interview #{interview_id} erstellt. Aufnahme kann beginnen.")
+                st.success(f"✅ Interview #{interview_id} erstellt.")
                 st.rerun()
     
     if st.session_state.current_interview_id:
@@ -342,9 +323,10 @@ with tab1:
         st.markdown("---")
         st.markdown("### 🎙️ Sprachaufnahme & Bearbeitung")
 
+        # KORRIGIERTE ZEILE: Der 'height'-Parameter wurde entfernt, um den Fehler zu beheben.
         component_value = st.components.v1.html(
             create_speech_interface(st.session_state.transcript_text),
-            height=300, key="speech_to_text"
+            key="speech_to_text"
         )
 
         if component_value and component_value.get("text") != st.session_state.transcript_text:
@@ -369,7 +351,6 @@ with tab1:
             update_interview_field(st.session_state.current_interview_id, "notes", notes)
             st.success("✅ Notizen gespeichert!")
 
-# --- TAB 2: ÜBERSICHT ---
 with tab2:
     st.header("📊 Interview-Übersicht")
     conn = sqlite3.connect('interviews.db')
@@ -385,15 +366,12 @@ with tab2:
             with st.expander(f"Interview #{interview['id']} - {interview['interview_date']} - {interview['interviewer']}"):
                 st.write(f"**Person:** {interview['interviewee_info']}")
                 st.write(f"**Textlänge:** {len(interview['transcription'] or '')} Zeichen")
-                
                 if interview['transcription']:
                     st.text_area("Transkription:", value=interview['transcription'], height=150, disabled=True, key=f"trans_{interview['id']}")
                 else:
                     st.warning("⚠️ Keine Transkription")
-                
                 if interview['notes']:
                     st.info(f"**Notizen:** {interview['notes']}")
-                
                 html_content = generate_pdf_simple(interview)
                 st.download_button(
                     label=f"📥 Interview #{interview['id']} als HTML", data=html_content,
@@ -411,7 +389,6 @@ with tab2:
             mime="application/json"
         )
 
-# --- TAB 3: HILFE ---
 with tab3:
     st.header("ℹ️ Anleitung")
     st.markdown("""
@@ -439,13 +416,6 @@ with tab3:
     
     -   **Automatische Übertragung:** Du musst den Text nicht mehr manuell kopieren. Was du sprichst, landet direkt im Textfeld.
     -   **Browser-Zugriff:** Du musst beim ersten Mal den Zugriff auf dein Mikrofon im Browser erlauben.
-    -   **Browser-Kompatibilität:** Die App funktioniert am besten mit **Google Chrome** oder **Microsoft Edge** auf einem Computer.
+    -   **Browser-Kompatibilität:** Die App funktioniert am besten mit **Google Chrome** oder **Microsoft Edge** auf einem Computer oder Android-Gerät.
     -   **Notizen:** Du kannst jederzeit Notizen hinzufügen und separat speichern.
-    
-    ---
-    
-    ### 📊 **Übersicht & Export**
-    -   Im Tab `📊 Übersicht` findest du alle gespeicherten Interviews.
-    -   Du kannst jedes Interview einzeln als HTML/PDF herunterladen.
-    -   Mit dem JSON-Export kannst du ein komplettes Backup aller Daten erstellen.
     """)
