@@ -76,7 +76,7 @@ def generate_pdf_simple(interview_data):
     return html_content
 
 def create_speech_interface(initial_text=""):
-    """Erstellt die HTML/JS-Schnittstelle mit Bugfixes für Android (Looping & UI)."""
+    """Erstellt die HTML/JS-Schnittstelle mit finalen Bugfixes."""
     escaped_text = json.dumps(initial_text)
     return f"""
     <!DOCTYPE html>
@@ -121,8 +121,8 @@ def create_speech_interface(initial_text=""):
             Streamlit.setComponentReady();
             let rec = null;
             let active = false;
-            let currentTranscript = {escaped_text};
-            document.getElementById('final').textContent = currentTranscript;
+            let baseTranscript = {escaped_text};
+            document.getElementById('final').textContent = baseTranscript;
 
             if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {{
                 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -140,18 +140,22 @@ def create_speech_interface(initial_text=""):
 
                 rec.onresult = (event) => {{
                     let interim_transcript = '';
-                    for (let i = event.resultIndex; i < event.results.length; ++i) {{
+                    let final_transcript = baseTranscript;
+
+                    // VERBESSERTE LOGIK: Baue das Transkript bei jedem Durchlauf komplett neu auf.
+                    // Das verhindert zuverlässig die Duplikation auf Android.
+                    for (let i = 0; i < event.results.length; ++i) {{
                         let segment = event.results[i][0].transcript;
                         if (event.results[i].isFinal) {{
-                            currentTranscript += segment.trim() + ' ';
+                            final_transcript += segment.trim() + ' ';
                         }} else {{
                             interim_transcript += segment;
                         }}
                     }}
                     
-                    document.getElementById('final').textContent = currentTranscript;
+                    document.getElementById('final').textContent = final_transcript;
                     document.getElementById('interim').textContent = interim_transcript;
-                    Streamlit.setComponentValue({{ text: currentTranscript }});
+                    Streamlit.setComponentValue({{ text: final_transcript }});
                 }};
 
                 rec.onerror = (e) => {{
@@ -163,6 +167,7 @@ def create_speech_interface(initial_text=""):
                 }};
                 
                 rec.onend = () => {{
+                    baseTranscript = document.getElementById('final').textContent; // Update base text
                     if (active) {{
                         rec.start();
                     }} else {{
@@ -418,3 +423,4 @@ with tab3:
     -   **Browser-Kompatibilität:** Die App funktioniert am besten mit **Google Chrome** oder **Microsoft Edge** auf einem Computer oder Android-Gerät.
     -   **Notizen:** Du kannst jederzeit Notizen hinzufügen und separat speichern.
     """)
+
